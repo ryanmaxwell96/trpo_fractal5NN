@@ -31,14 +31,12 @@ class Policy(object):
         self.trpo.compile(optimizer=Adam(self.lr * self.lr_multiplier))
         self.logprob_calc = LogProb()
 
-        self.run_call = 1
-
     def get_trpo_policy_model(self):
         return self.trpo
 
     def sample(self, obs):
         """Draw sample from policy."""
-        act_means, act_logvars = self.policy.call_polNN(obs)
+        act_means, act_logvars = self.policy(obs) # call in PolicyNN class
         act_stddevs = np.exp(act_logvars / 2)
 
         return np.random.normal(act_means, act_stddevs).astype(np.float32)
@@ -54,10 +52,10 @@ class Policy(object):
         """
         K.set_value(self.trpo.optimizer.lr, self.lr * self.lr_multiplier)
         K.set_value(self.trpo.beta, self.beta)
-        old_means, old_logvars = self.policy.call_polNN(observes)
+        old_means, old_logvars = self.policy(observes) # call in PolicyNN class
         old_means = old_means.numpy()
         old_logvars = old_logvars.numpy()
-        old_logp = self.logprob_calc.call_LogP([actions, old_means, old_logvars])
+        old_logp = self.logprob_calc([actions, old_means, old_logvars]) # call in LogProb class
         old_logp = old_logp.numpy()
         loss, kl, entropy = 0, 0, 0
         for e in range(self.epochs):
@@ -75,7 +73,6 @@ class Policy(object):
             # print(old_logp)
             # input('')
             # die = die
-
             loss = self.trpo.train_on_batch([observes, actions, advantages, 
                                              old_means, old_logvars, old_logp])
             # print('setting weight [0][0][0] to 500')
@@ -84,11 +81,6 @@ class Policy(object):
             # input('')
             kl, entropy = self.trpo.predict_on_batch([observes, actions, advantages,
                                                       old_means, old_logvars, old_logp])
-
-            if self.run_call == 1:
-                self.trpo([observes, actions, advantages, old_means, old_logvars, old_logp])
-                self.trpo.save('policy_model')
-                self.run_call = 0
             # kl->distance from previous policy
             # entropy->amount of information contained in the new policy
             kl, entropy = np.mean(kl), np.mean(entropy)
@@ -119,7 +111,7 @@ class PolicyNN(Layer):
     """
     def __init__(self, obs_dim, act_dim, hid1_mult, init_logvar, **kwargs):
         super(PolicyNN, self).__init__(**kwargs)
-        self.batch_sz = 1
+        self.batch_sz = None
         self.init_logvar = init_logvar
         hid1_units = obs_dim * hid1_mult
         hid3_units = act_dim * 40  # 10 empirically determined
@@ -139,7 +131,10 @@ class PolicyNN(Layer):
         print('Policy Params -- h1: {}, h2: {}, h3: {}, lr: {:.3g}, logvar_speed: {}'
               .format(hid1_units, hid2_units, hid3_units, self.lr, logvar_speed))
 
-    def call_polNN(self, inputs, **kwargs):
+    def build(self, input_shape):
+        self.batch_sz = input_shape[0]
+
+    def call(self, inputs, **kwargs):
         y = self.dense1(inputs)
         y = self.dense2(y)
         y = self.dense3(y)
@@ -167,7 +162,7 @@ class KLEntropy(Layer):
         # print('Ant->8,CartPole->1, or Humanoid-17')
         self.act_dim = act_dim
 
-    def call_KLE(self, inputs, **kwargs):
+    def call(self, inputs, **kwargs):
         old_means, old_logvars, new_means, new_logvars = inputs
         log_det_cov_old = K.sum(old_logvars, axis=-1, keepdims=True)
         log_det_cov_new = K.sum(new_logvars, axis=-1, keepdims=True)
@@ -187,7 +182,7 @@ class LogProb(Layer):
     def __init__(self, **kwargs):
         super(LogProb, self).__init__(**kwargs)
 
-    def call_LogP(self, inputs, **kwargs):
+    def call(self, inputs, **kwargs):
         actions, act_means, act_logvars = inputs
         logp = -0.5 * K.sum(act_logvars, axis=-1, keepdims=True)
         logp += -0.5 * K.sum(K.square(actions - act_means) / K.exp(act_logvars),
@@ -213,9 +208,9 @@ class TRPO(Model):
 
     def call(self, inputs):
         obs, act, adv, old_means, old_logvars, old_logp = inputs
-        new_means, new_logvars = self.policy.call_polNN(obs)
-        new_logp = self.logprob.call_LogP([act, new_means, new_logvars])
-        kl, entropy = self.kl_entropy.call_KLE([old_means, old_logvars,
+        new_means, new_logvars = self.policy(obs) # call in PolicyNN class
+        new_logp = self.logprob([act, new_means, new_logvars]) # call in LogProb class 
+        kl, entropy = self.kl_entropy([old_means, old_logvars, # call in KLEntropy class
                                        new_means, new_logvars])
         loss1 = -K.mean(adv * K.exp(new_logp - old_logp))
         loss2 = K.mean(self.beta * kl)

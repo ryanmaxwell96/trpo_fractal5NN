@@ -41,6 +41,7 @@ from tensorflow.keras.models import model_from_json
 from tensorflow.keras.models import load_model
 from tensorflow.keras.initializers import glorot_uniform
 import pickle
+import dill
 import tempfile
 from tensorflow.keras import Model
 
@@ -331,7 +332,6 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, ini
         loading == 'n'
 
     save_weights_flag = 1
-    save_model = 1
 
     episode = 0
     while episode < num_episodes:
@@ -360,10 +360,11 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, ini
         # add various stats to training log:
         log_batch_stats(observes, actions, advantages, disc_sum_rew, logger, episode)
         policy.update(observes, actions, advantages, logger)  # update policy
-        # if save_model == 1:
-        #     policy_model = policy.get_trpo_policy_model()
-        #     policy_model.save('policy_model')
-        #     save_model = 0
+        if episode > 50:
+            policy_model = policy.get_trpo_policy_model()
+            print('about to save model')
+            input('')
+            policy_model.save('policy_model')
         val_func.fit(observes, disc_sum_rew, logger)  # update value function
         logger.write(display=True)  # write logger results to file and stdout
         if killer.kill_now:
